@@ -61,6 +61,7 @@ namespace Edj20Tester
                         byte qtyHi = 0x00;
                         byte qtyLo = 0x02;
 
+                        //CRC Calculation for request
                         byte[] reqCore = { SlaveId, fc, addrHi, addrLo, qtyHi, qtyLo };
                         ushort reqCrc = ComputeCrc(reqCore);
                         byte crcLo = (byte)(reqCrc & 0xFF);
