@@ -31,7 +31,7 @@
 
         <Style TargetType="ComboBox">
             <Setter Property="Background"  Value="#111111"/>
-            <Setter Property="Foreground"  Value="White"/>
+            <Setter Property="Foreground"  Value="Black"/>
             <Setter Property="BorderBrush" Value="#555555"/>
             <Setter Property="FontFamily"  Value="Consolas"/>
             <Setter Property="FontSize"    Value="13"/>
@@ -218,7 +218,7 @@
                          VerticalAlignment="Center"/>
                 <TextBlock Name="StatusText"
                            Text="STATUS : READY"
-                           Foreground="White"
+                           Foreground="Black"
                            FontFamily="Consolas"
                            FontSize="16"
                            FontWeight="Bold"
