@@ -13,7 +13,7 @@ namespace Edj20Tester
             InitializeComponent();
         }
 
-        // ── Button handlers ───────────────────────────────────────────────────
+        //Button Handlers
 
         private async void btnStart_Click(object sender, RoutedEventArgs e)
         {
