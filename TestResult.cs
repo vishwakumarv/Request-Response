@@ -20,14 +20,14 @@ namespace Edj20Tester.Models
 
     public class TestResult
     {
-        public string TestPoint { get; set; }
-        public string TestType { get; set; }
+        public string TestPoint { get; set; } = string.Empty;
+        public string TestType { get; set; } = string.Empty;
         public ModbusFunction Function { get; set; }
         public double MeasuredValue { get; set; }
-        public string Unit { get; set; }
-        public string ExpectedRange { get; set; }
+        public string Unit { get; set; } = string.Empty;
+        public string ExpectedRange { get; set; } = string.Empty;
         public TestStatus Status { get; set; }
-        public string Notes { get; set; }
+        public string Notes { get; set; } = string.Empty;
         public DateTime Timestamp { get; set; } = DateTime.UtcNow;
 
         public bool IsPass => Status == TestStatus.Pass;
