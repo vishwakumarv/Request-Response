@@ -36,11 +36,9 @@ namespace Edj20Tester
         private const byte UnitId = 0x01;
         private int _transactionId = 0;
 
-        // ── MBAP Header builder ───────────────────────────────────────────────
         private byte[] BuildTcpFrame(byte[] pdu, ushort tid)
         {
             ushort length = (ushort)(1 + pdu.Length);
-
             byte[] mbap = new byte[]
             {
                 (byte)(tid    >> 8), (byte)(tid    & 0xFF),
@@ -48,17 +46,14 @@ namespace Edj20Tester
                 (byte)(length >> 8), (byte)(length & 0xFF),
                 UnitId
             };
-
             return mbap.Concat(pdu).ToArray();
         }
 
-        // ── Thread-safe transaction ID ────────────────────────────────────────
         private ushort NextTransactionId()
         {
             return (ushort)(Interlocked.Increment(ref _transactionId) & 0xFFFF);
         }
 
-        // ── Packet builder helper ─────────────────────────────────────────────
         private ModbusPacket MakePacket(byte[] fullFrame, byte fc, ModbusFunction fn,
                                         ushort startAddr, ushort qty,
                                         byte byteCount, byte[] dataBytes, bool isResponse)
@@ -80,7 +75,6 @@ namespace Edj20Tester
             };
         }
 
-        // ── Modbus exception response builder ─────────────────────────────────
         private DeviceResponse BuildExceptionResponse(ModbusFunction function,
                                                        byte exceptionCode,
                                                        ModbusPacket request)
@@ -105,7 +99,10 @@ namespace Edj20Tester
         }
 
         // ── SendAsync ─────────────────────────────────────────────────────────
-        public async Task<DeviceResponse> SendAsync(ModbusFunction function)
+        // startAddress and quantity are only used by FC03/FC04
+        public async Task<DeviceResponse> SendAsync(ModbusFunction function,
+                                                     ushort startAddress = 0,
+                                                     ushort quantity = 2)
         {
             return await Task.Run(() =>
             {
@@ -114,10 +111,14 @@ namespace Edj20Tester
                     return function switch
                     {
                         ModbusFunction.FC03_ReadHoldingRegisters or
-                        ModbusFunction.FC04_ReadInputRegisters => BuildReadRegisterResponse(function),
+                        ModbusFunction.FC04_ReadInputRegisters
+                            => BuildReadRegisterResponse(function, startAddress, quantity),
 
-                        ModbusFunction.FC06_WriteSingleRegister => BuildWriteSingleRegisterResponse(),
-                        ModbusFunction.FC16_WriteMultipleRegisters => BuildWriteMultipleRegistersResponse(),
+                        ModbusFunction.FC06_WriteSingleRegister
+                            => BuildWriteSingleRegisterResponse(),
+
+                        ModbusFunction.FC16_WriteMultipleRegisters
+                            => BuildWriteMultipleRegistersResponse(),
 
                         _ => new DeviceResponse($"ERROR: Unsupported function code 0x{(byte)function:X2}")
                     };
@@ -130,43 +131,44 @@ namespace Edj20Tester
         }
 
         // ── FC03 / FC04 – Read Holding / Input Registers ─────────────────────
-        // Request PDU : [FC][AddrHi][AddrLo][QtyHi][QtyLo]
-        // Response PDU: [FC][ByteCount][RegData...]
-        private DeviceResponse BuildReadRegisterResponse(ModbusFunction function)
+        private DeviceResponse BuildReadRegisterResponse(ModbusFunction function,
+                                                          ushort startAddress,
+                                                          ushort quantity)
         {
             byte fc = (byte)function;
-            byte addrHi = 0x00; byte addrLo = 0x00;
-            byte qtyHi = 0x00; byte qtyLo = 0x02;
+            byte addrHi = (byte)(startAddress >> 8);
+            byte addrLo = (byte)(startAddress & 0xFF);
+            byte qtyHi = (byte)(quantity >> 8);
+            byte qtyLo = (byte)(quantity & 0xFF);
             ushort reqTid = NextTransactionId();
 
             byte[] reqPdu = { fc, addrHi, addrLo, qtyHi, qtyLo };
             byte[] reqFull = BuildTcpFrame(reqPdu, reqTid);
-            ushort startAddr = (ushort)((addrHi << 8) | addrLo);
-            ushort qty = (ushort)((qtyHi << 8) | qtyLo);
             var req = MakePacket(reqFull, fc, function,
-                                 startAddr, qty,
+                                 startAddress, quantity,
                                  byteCount: 0, dataBytes: null,
                                  isResponse: false);
 
-            // Two 16-bit registers: Reg1 = 6, Reg2 = 5
-            byte byteCount = 0x04;
-            byte d1Hi = 0x00; byte d1Lo = 0x06;
-            byte d2Hi = 0x00; byte d2Lo = 0x05;
+            // Build simulated response: each register = 0x0000 by default
+            byte byteCount = (byte)(quantity * 2);
+            byte[] regData = new byte[byteCount]; // all zeros simulation
             ushort resTid = NextTransactionId();
 
-            byte[] resPdu = { fc, byteCount, d1Hi, d1Lo, d2Hi, d2Lo };
+            byte[] resPdu = new byte[2 + byteCount];
+            resPdu[0] = fc;
+            resPdu[1] = byteCount;
+            Array.Copy(regData, 0, resPdu, 2, byteCount);
+
             byte[] resFull = BuildTcpFrame(resPdu, resTid);
             var res = MakePacket(resFull, fc, function,
-                                 startAddr, qty,
-                                 byteCount, dataBytes: new byte[] { d1Hi, d1Lo, d2Hi, d2Lo },
+                                 startAddress, quantity,
+                                 byteCount, dataBytes: regData,
                                  isResponse: true);
 
             return new DeviceResponse("OK") { Request = req, Response = res };
         }
 
         // ── FC06 – Write Single Register ─────────────────────────────────────
-        // Request PDU : [FC][AddrHi][AddrLo][ValHi][ValLo]
-        // Response PDU: echo of request PDU (same TID)
         private DeviceResponse BuildWriteSingleRegisterResponse()
         {
             const byte fc = (byte)ModbusFunction.FC06_WriteSingleRegister;
@@ -192,16 +194,14 @@ namespace Edj20Tester
         }
 
         // ── FC16 – Write Multiple Registers ──────────────────────────────────
-        // Request PDU : [FC][AddrHi][AddrLo][QtyHi][QtyLo][ByteCount][RegData...]
-        // Response PDU: [FC][AddrHi][AddrLo][QtyHi][QtyLo]
         private DeviceResponse BuildWriteMultipleRegistersResponse()
         {
             const byte fc = (byte)ModbusFunction.FC16_WriteMultipleRegisters;
             byte addrHi = 0x00; byte addrLo = 0x00;
             byte qtyHi = 0x00; byte qtyLo = 0x02;
             byte byteCount = 0x04;
-            byte r1Hi = 0x00; byte r1Lo = 0x0A;  // Reg1 = 10
-            byte r2Hi = 0x01; byte r2Lo = 0x02;  // Reg2 = 258
+            byte r1Hi = 0x00; byte r1Lo = 0x0A;
+            byte r2Hi = 0x01; byte r2Lo = 0x02;
             ushort reqTid = NextTransactionId();
 
             byte[] reqPdu = { fc, addrHi, addrLo, qtyHi, qtyLo, byteCount, r1Hi, r1Lo, r2Hi, r2Lo };
