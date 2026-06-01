@@ -194,7 +194,8 @@
                       Width="280" Height="40"
                       SelectedIndex="0"
                       Margin="0,0,12,0"
-                      VerticalContentAlignment="Center">
+                      VerticalContentAlignment="Center"
+                      SelectionChanged="FunctionSelector_SelectionChanged">
                 <ComboBoxItem Content="FC03 – Read Holding Registers"
                               Tag="{x:Static models:ModbusFunction.FC03_ReadHoldingRegisters}"/>
                 <ComboBoxItem Content="FC04 – Read Input Registers"
@@ -204,6 +205,40 @@
                 <ComboBoxItem Content="FC16 – Write Multiple Registers"
                               Tag="{x:Static models:ModbusFunction.FC16_WriteMultipleRegisters}"/>
             </ComboBox>
+
+            <!-- Start Address (shown for FC03/FC04) -->
+            <StackPanel Name="PanelStartAddress"
+                        Orientation="Horizontal"
+                        VerticalAlignment="Center"
+                        Margin="0,0,12,0"
+                        Visibility="Visible">
+                <TextBlock Text="Start Addr:"
+                           Foreground="#AAAAAA"
+                           FontFamily="Consolas"
+                           FontSize="13"
+                           VerticalAlignment="Center"
+                           Margin="0,0,6,0"/>
+                <TextBox Name="TxtStartAddress"
+                         Width="70" Height="40"
+                         Text="0"/>
+            </StackPanel>
+
+            <!-- Quantity (shown for FC03/FC04) -->
+            <StackPanel Name="PanelQuantity"
+                        Orientation="Horizontal"
+                        VerticalAlignment="Center"
+                        Margin="0,0,12,0"
+                        Visibility="Visible">
+                <TextBlock Text="Quantity:"
+                           Foreground="#AAAAAA"
+                           FontFamily="Consolas"
+                           FontSize="13"
+                           VerticalAlignment="Center"
+                           Margin="0,0,6,0"/>
+                <TextBox Name="TxtQuantity"
+                         Width="70" Height="40"
+                         Text="2"/>
+            </StackPanel>
 
             <Button Name="btnStart"
                     Click="btnStart_Click"
