@@ -75,8 +75,34 @@ namespace Edj20Tester
             if (FunctionSelector?.SelectedItem is ComboBoxItem item && item.Tag is ModbusFunction fn)
                 function = fn;
 
+            // Read start address and quantity from UI (only used for FC03/FC04)
+            ushort startAddress = 0;
+            ushort quantity = 2;
+            if (function == ModbusFunction.FC03_ReadHoldingRegisters ||
+                function == ModbusFunction.FC04_ReadInputRegisters)
+            {
+                if (!ushort.TryParse(TxtStartAddress.Text.Trim(), out startAddress))
+                {
+                    MessageBox.Show("Invalid Start Address. Enter a number between 0 and 65535.",
+                                    "Input Error", MessageBoxButton.OK, MessageBoxImage.Warning);
+                    btnStart.IsEnabled = true;
+                    StatusDot.Fill = Brushes.Lime;
+                    StatusText.Text = "STATUS : READY";
+                    return;
+                }
+                if (!ushort.TryParse(TxtQuantity.Text.Trim(), out quantity) || quantity == 0)
+                {
+                    MessageBox.Show("Invalid Quantity. Enter a number between 1 and 125.",
+                                    "Input Error", MessageBoxButton.OK, MessageBoxImage.Warning);
+                    btnStart.IsEnabled = true;
+                    StatusDot.Fill = Brushes.Lime;
+                    StatusText.Text = "STATUS : READY";
+                    return;
+                }
+            }
+
             var client = new DeviceClient();
-            var response = await client.SendAsync(function);
+            var response = await client.SendAsync(function, startAddress, quantity);
 
             RequestPanel.Children.Clear();
             ResponsePanel.Children.Clear();
@@ -105,12 +131,25 @@ namespace Edj20Tester
             StatusText.Text = "STATUS : READY";
         }
 
+        // ── Function selector changed ─────────────────────────────────────────
+
+        private void FunctionSelector_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        {
+            if (PanelStartAddress == null || PanelQuantity == null) return;
+
+            var fn = (FunctionSelector.SelectedItem as ComboBoxItem)?.Tag as ModbusFunction?;
+            bool show = fn == ModbusFunction.FC03_ReadHoldingRegisters ||
+                        fn == ModbusFunction.FC04_ReadInputRegisters;
+
+            PanelStartAddress.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
+            PanelQuantity.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
+        }
+
         // ── TCP Handshake block ───────────────────────────────────────────────
 
         private UIElement BuildTcpHandshakeBlock(bool isRequestSide)
         {
             string clientIp = TxtIpAddress.Text.Trim();
-            string serverIp = TxtIpAddress.Text.Trim();
             string port = TxtPort.Text.Trim();
 
             var outer = new StackPanel { Margin = new Thickness(0, 0, 0, 18) };
@@ -213,11 +252,11 @@ namespace Edj20Tester
             {
                 case ModbusFunction.FC03_ReadHoldingRegisters:
                 case ModbusFunction.FC04_ReadInputRegisters:
-                    AddRow(grid, row++, "Starting Address Hi", $"{(pkt.StartAddress >> 8):X2}", $"{pkt.StartAddress >> 8}", "00");
-                    AddRow(grid, row++, "Starting Address Lo", $"{(pkt.StartAddress & 0xFF):X2}", $"{pkt.StartAddress & 0xFF}", "00");
-                    AddRow(grid, row++, "No. of Registers Hi", $"{(pkt.Quantity >> 8):X2}", $"{pkt.Quantity >> 8}", "00");
-                    AddRow(grid, row++, "No. of Registers Lo", $"{(pkt.Quantity & 0xFF):X2}", $"{pkt.Quantity & 0xFF}", "02");
-                    AddRow(grid, row++, "Total Bytes", pkt.RawBytes.Length.ToString(), "—", "12");
+                    AddRow(grid, row++, "Starting Address Hi", $"{(pkt.StartAddress >> 8):X2}", $"{pkt.StartAddress >> 8}", "—");
+                    AddRow(grid, row++, "Starting Address Lo", $"{(pkt.StartAddress & 0xFF):X2}", $"{pkt.StartAddress & 0xFF}", "—");
+                    AddRow(grid, row++, "No. of Registers Hi", $"{(pkt.Quantity >> 8):X2}", $"{pkt.Quantity >> 8}", "—");
+                    AddRow(grid, row++, "No. of Registers Lo", $"{(pkt.Quantity & 0xFF):X2}", $"{pkt.Quantity & 0xFF}", "—");
+                    AddRow(grid, row++, "Total Bytes", pkt.RawBytes.Length.ToString(), "—", "—");
                     break;
 
                 case ModbusFunction.FC06_WriteSingleRegister:
@@ -275,39 +314,27 @@ namespace Edj20Tester
             switch (pkt.Function)
             {
                 case ModbusFunction.FC03_ReadHoldingRegisters:
-                    AddRow(grid, row++, "Byte Count", $"{pkt.ByteCount:X2}", $"{pkt.ByteCount}", "04");
-                    if (pkt.DataBytes != null)
-                    {
-                        string[] expRegBytes = { "00", "06", "00", "05" };
-                        for (int i = 0; i + 1 < pkt.DataBytes.Length; i += 2)
-                        {
-                            int regNum = (i / 2) + 1;
-                            byte hi = pkt.DataBytes[i];
-                            byte lo = pkt.DataBytes[i + 1];
-                            ushort val = (ushort)((hi << 8) | lo);
-                            AddRow(grid, row++, $"Reg {regNum} Hi  [= {val} decimal]", $"{hi:X2}", $"{hi}", i < expRegBytes.Length ? expRegBytes[i] : "—");
-                            AddRow(grid, row++, $"Reg {regNum} Lo", $"{lo:X2}", $"{lo}", i + 1 < expRegBytes.Length ? expRegBytes[i + 1] : "—");
-                        }
-                    }
-                    AddRow(grid, row++, "Total Bytes", pkt.RawBytes.Length.ToString(), "—", "13");
-                    break;
-
                 case ModbusFunction.FC04_ReadInputRegisters:
-                    AddRow(grid, row++, "Byte Count", $"{pkt.ByteCount:X2}", $"{pkt.ByteCount}", "04");
+                    AddRow(grid, row++, "Byte Count", $"{pkt.ByteCount:X2}", $"{pkt.ByteCount}", "—");
                     if (pkt.DataBytes != null)
                     {
-                        string[] expRegBytes = { "00", "06", "00", "05" };
                         for (int i = 0; i + 1 < pkt.DataBytes.Length; i += 2)
                         {
                             int regNum = (i / 2) + 1;
                             byte hi = pkt.DataBytes[i];
                             byte lo = pkt.DataBytes[i + 1];
                             ushort val = (ushort)((hi << 8) | lo);
-                            AddRow(grid, row++, $"Data Hi (Reg {regNum})  [= {val} decimal]", $"{hi:X2}", $"{hi}", i < expRegBytes.Length ? expRegBytes[i] : "—");
-                            AddRow(grid, row++, $"Data Lo (Reg {regNum})", $"{lo:X2}", $"{lo}", i + 1 < expRegBytes.Length ? expRegBytes[i + 1] : "—");
+                            string label = pkt.Function == ModbusFunction.FC03_ReadHoldingRegisters
+                                ? $"Reg {regNum} Hi  [= {val} decimal]"
+                                : $"Data Hi (Reg {regNum})  [= {val} decimal]";
+                            string labelLo = pkt.Function == ModbusFunction.FC03_ReadHoldingRegisters
+                                ? $"Reg {regNum} Lo"
+                                : $"Data Lo (Reg {regNum})";
+                            AddRow(grid, row++, label, $"{hi:X2}", $"{hi}", "—");
+                            AddRow(grid, row++, labelLo, $"{lo:X2}", $"{lo}", "—");
                         }
                     }
-                    AddRow(grid, row++, "Total Bytes", pkt.RawBytes.Length.ToString(), "—", "13");
+                    AddRow(grid, row++, "Total Bytes", pkt.RawBytes.Length.ToString(), "—", "—");
                     break;
 
                 case ModbusFunction.FC06_WriteSingleRegister:
