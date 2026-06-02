@@ -75,9 +75,9 @@ namespace Edj20Tester
             if (FunctionSelector?.SelectedItem is ComboBoxItem item && item.Tag is ModbusFunction fn)
                 function = fn;
 
-            // Read start address and quantity from UI (only used for FC03/FC04)
             ushort startAddress = 0;
-            ushort quantity = 2;
+            ushort quantity = 1;
+
             if (function == ModbusFunction.FC03_ReadHoldingRegisters ||
                 function == ModbusFunction.FC04_ReadInputRegisters)
             {
@@ -90,14 +90,24 @@ namespace Edj20Tester
                     StatusText.Text = "STATUS : READY";
                     return;
                 }
-                if (!ushort.TryParse(TxtQuantity.Text.Trim(), out quantity) || quantity == 0)
+
+                bool isSingle = ReadModeSelector.SelectedIndex == 0;
+
+                if (isSingle)
                 {
-                    MessageBox.Show("Invalid Quantity. Enter a number between 1 and 125.",
-                                    "Input Error", MessageBoxButton.OK, MessageBoxImage.Warning);
-                    btnStart.IsEnabled = true;
-                    StatusDot.Fill = Brushes.Lime;
-                    StatusText.Text = "STATUS : READY";
-                    return;
+                    quantity = 1;
+                }
+                else
+                {
+                    if (!ushort.TryParse(TxtQuantity.Text.Trim(), out quantity) || quantity == 0)
+                    {
+                        MessageBox.Show("Invalid Quantity. Enter a number between 1 and 125.",
+                                        "Input Error", MessageBoxButton.OK, MessageBoxImage.Warning);
+                        btnStart.IsEnabled = true;
+                        StatusDot.Fill = Brushes.Lime;
+                        StatusText.Text = "STATUS : READY";
+                        return;
+                    }
                 }
             }
 
@@ -107,11 +117,9 @@ namespace Edj20Tester
             RequestPanel.Children.Clear();
             ResponsePanel.Children.Clear();
 
-            // 1. TCP handshake section
             RequestPanel.Children.Add(BuildTcpHandshakeBlock(isRequestSide: true));
             ResponsePanel.Children.Add(BuildTcpHandshakeBlock(isRequestSide: false));
 
-            // 2. Modbus packet tables
             if (response.Request != null) RequestPanel.Children.Add(BuildRequestTable(response.Request));
             if (response.Response != null) ResponsePanel.Children.Add(BuildResponseTable(response.Response));
 
@@ -131,18 +139,46 @@ namespace Edj20Tester
             StatusText.Text = "STATUS : READY";
         }
 
-        // ── Function selector changed ─────────────────────────────────────────
+        // ── Selector Changed Handlers ─────────────────────────────────────────
 
         private void FunctionSelector_SelectionChanged(object sender, SelectionChangedEventArgs e)
         {
-            if (PanelStartAddress == null || PanelQuantity == null) return;
+            if (PanelStartAddress == null || PanelQuantity == null || PanelReadMode == null) return;
 
             var fn = (FunctionSelector.SelectedItem as ComboBoxItem)?.Tag as ModbusFunction?;
-            bool show = fn == ModbusFunction.FC03_ReadHoldingRegisters ||
-                        fn == ModbusFunction.FC04_ReadInputRegisters;
+            bool isReadFn = fn == ModbusFunction.FC03_ReadHoldingRegisters ||
+                            fn == ModbusFunction.FC04_ReadInputRegisters;
 
-            PanelStartAddress.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
-            PanelQuantity.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
+            PanelStartAddress.Visibility = isReadFn ? Visibility.Visible : Visibility.Collapsed;
+            PanelReadMode.Visibility = isReadFn ? Visibility.Visible : Visibility.Collapsed;
+
+            // Quantity visibility depends on read mode, only when it's a read function
+            if (isReadFn)
+            {
+                bool isMultiple = ReadModeSelector.SelectedIndex == 1;
+                PanelQuantity.Visibility = isMultiple ? Visibility.Visible : Visibility.Collapsed;
+            }
+            else
+            {
+                PanelQuantity.Visibility = Visibility.Collapsed;
+            }
+        }
+
+        private void ReadModeSelector_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        {
+            if (PanelQuantity == null || TxtQuantity == null) return;
+
+            bool isMultiple = ReadModeSelector.SelectedIndex == 1;
+
+            if (isMultiple)
+            {
+                PanelQuantity.Visibility = Visibility.Visible;
+            }
+            else
+            {
+                PanelQuantity.Visibility = Visibility.Collapsed;
+                TxtQuantity.Text = "1";
+            }
         }
 
         // ── TCP Handshake block ───────────────────────────────────────────────
