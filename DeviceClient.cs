@@ -1,5 +1,6 @@
 using System;
 using System.Linq;
+using System.Net.Sockets;
 using System.Threading;
 using System.Threading.Tasks;
 using Edj20Tester.Models;
@@ -35,6 +36,10 @@ namespace Edj20Tester
     {
         private const byte UnitId = 0x01;
         private int _transactionId = 0;
+
+        // TCP connection supplied by MainWindow after connect
+        public string IpAddress { get; set; } = "127.0.0.1";
+        public int Port { get; set; } = 502;
 
         private byte[] BuildTcpFrame(byte[] pdu, ushort tid)
         {
@@ -75,65 +80,77 @@ namespace Edj20Tester
             };
         }
 
-        private DeviceResponse BuildExceptionResponse(ModbusFunction function,
-                                                       byte exceptionCode,
-                                                       ModbusPacket request)
+        // ── Send raw frame over TCP and read response ─────────────────────────
+        private async Task<byte[]> SendAndReceiveAsync(byte[] requestFrame)
         {
-            byte fc = (byte)function;
-            byte errorFc = (byte)(fc | 0x80);
-            ushort tid = NextTransactionId();
+            using var tcp = new TcpClient();
+            await tcp.ConnectAsync(IpAddress, Port);
+            tcp.ReceiveTimeout = 3000;
+            tcp.SendTimeout = 3000;
 
-            byte[] resPdu = { errorFc, exceptionCode };
-            byte[] resFull = BuildTcpFrame(resPdu, tid);
-            var res = MakePacket(resFull, errorFc, function,
-                                 startAddr: 0, qty: 0,
-                                 byteCount: 0,
-                                 dataBytes: new byte[] { exceptionCode },
-                                 isResponse: true);
+            var stream = tcp.GetStream();
 
-            return new DeviceResponse($"ERROR: Exception 0x{exceptionCode:X2}")
+            // Send request
+            await stream.WriteAsync(requestFrame, 0, requestFrame.Length);
+
+            // Read MBAP header first (7 bytes) to know total length
+            byte[] header = new byte[7];
+            int read = 0;
+            while (read < 7)
             {
-                Request = request,
-                Response = res
-            };
+                int n = await stream.ReadAsync(header, read, 7 - read);
+                if (n == 0) throw new Exception("Connection closed by device.");
+                read += n;
+            }
+
+            // Bytes 4-5 of MBAP = length field (covers unit id + PDU)
+            int pduLen = (header[4] << 8) | header[5];
+
+            // Read remaining PDU bytes (pduLen - 1 because unit id already in header)
+            byte[] pdu = new byte[pduLen - 1];
+            read = 0;
+            while (read < pdu.Length)
+            {
+                int n = await stream.ReadAsync(pdu, read, pdu.Length - read);
+                if (n == 0) throw new Exception("Connection closed by device.");
+                read += n;
+            }
+
+            return header.Concat(pdu).ToArray();
         }
 
         // ── SendAsync ─────────────────────────────────────────────────────────
-        // startAddress and quantity are only used by FC03/FC04
         public async Task<DeviceResponse> SendAsync(ModbusFunction function,
                                                      ushort startAddress = 0,
-                                                     ushort quantity = 2)
+                                                     ushort quantity = 1)
         {
-            return await Task.Run(() =>
+            try
             {
-                try
+                return function switch
                 {
-                    return function switch
-                    {
-                        ModbusFunction.FC03_ReadHoldingRegisters or
-                        ModbusFunction.FC04_ReadInputRegisters
-                            => BuildReadRegisterResponse(function, startAddress, quantity),
+                    ModbusFunction.FC03_ReadHoldingRegisters or
+                    ModbusFunction.FC04_ReadInputRegisters
+                        => await BuildReadRegisterResponse(function, startAddress, quantity),
 
-                        ModbusFunction.FC06_WriteSingleRegister
-                            => BuildWriteSingleRegisterResponse(),
+                    ModbusFunction.FC06_WriteSingleRegister
+                        => await BuildWriteSingleRegisterResponse(),
 
-                        ModbusFunction.FC16_WriteMultipleRegisters
-                            => BuildWriteMultipleRegistersResponse(),
+                    ModbusFunction.FC16_WriteMultipleRegisters
+                        => await BuildWriteMultipleRegistersResponse(),
 
-                        _ => new DeviceResponse($"ERROR: Unsupported function code 0x{(byte)function:X2}")
-                    };
-                }
-                catch (Exception ex)
-                {
-                    return new DeviceResponse($"ERROR: {ex.Message}");
-                }
-            });
+                    _ => new DeviceResponse($"ERROR: Unsupported function code 0x{(byte)function:X2}")
+                };
+            }
+            catch (Exception ex)
+            {
+                return new DeviceResponse($"ERROR: {ex.Message}");
+            }
         }
 
-        // ── FC03 / FC04 – Read Holding / Input Registers ─────────────────────
-        private DeviceResponse BuildReadRegisterResponse(ModbusFunction function,
-                                                          ushort startAddress,
-                                                          ushort quantity)
+        // ── FC03 / FC04 – Read Holding / Input Registers ──────────────────────
+        private async Task<DeviceResponse> BuildReadRegisterResponse(ModbusFunction function,
+                                                                      ushort startAddress,
+                                                                      ushort quantity)
         {
             byte fc = (byte)function;
             byte addrHi = (byte)(startAddress >> 8);
@@ -149,18 +166,36 @@ namespace Edj20Tester
                                  byteCount: 0, dataBytes: null,
                                  isResponse: false);
 
-            // Build simulated response: each register = 0x0000 by default
-            byte byteCount = (byte)(quantity * 2);
-            byte[] regData = new byte[byteCount]; // all zeros simulation
-            ushort resTid = NextTransactionId();
+            // Send to real device and receive response
+            byte[] resFull = await SendAndReceiveAsync(reqFull);
 
-            byte[] resPdu = new byte[2 + byteCount];
-            resPdu[0] = fc;
-            resPdu[1] = byteCount;
-            Array.Copy(regData, 0, resPdu, 2, byteCount);
+            // Parse response
+            // resFull: [TID Hi][TID Lo][Proto Hi][Proto Lo][Len Hi][Len Lo][UnitId][FC][ByteCount][Data...]
+            if (resFull.Length < 9)
+                return new DeviceResponse("ERROR: Response too short") { Request = req };
 
-            byte[] resFull = BuildTcpFrame(resPdu, resTid);
-            var res = MakePacket(resFull, fc, function,
+            byte resFc = resFull[7];
+
+            // Check for Modbus exception (FC | 0x80)
+            if ((resFc & 0x80) != 0)
+            {
+                byte exCode = resFull[8];
+                return new DeviceResponse($"ERROR: Modbus Exception 0x{exCode:X2}")
+                {
+                    Request = req,
+                    Response = MakePacket(resFull, resFc, function,
+                                          startAddress, quantity,
+                                          byteCount: 0,
+                                          dataBytes: new byte[] { exCode },
+                                          isResponse: true)
+                };
+            }
+
+            byte byteCount = resFull[8];
+            byte[] regData = new byte[byteCount];
+            Array.Copy(resFull, 9, regData, 0, Math.Min(byteCount, resFull.Length - 9));
+
+            var res = MakePacket(resFull, resFc, function,
                                  startAddress, quantity,
                                  byteCount, dataBytes: regData,
                                  isResponse: true);
@@ -168,8 +203,8 @@ namespace Edj20Tester
             return new DeviceResponse("OK") { Request = req, Response = res };
         }
 
-        // ── FC06 – Write Single Register ─────────────────────────────────────
-        private DeviceResponse BuildWriteSingleRegisterResponse()
+        // ── FC06 – Write Single Register ──────────────────────────────────────
+        private async Task<DeviceResponse> BuildWriteSingleRegisterResponse()
         {
             const byte fc = (byte)ModbusFunction.FC06_WriteSingleRegister;
             byte addrHi = 0x00; byte addrLo = 0x01;
@@ -184,17 +219,42 @@ namespace Edj20Tester
                                  byteCount: 0, dataBytes: new byte[] { valHi, valLo },
                                  isResponse: false);
 
-            byte[] resFull = BuildTcpFrame(reqPdu, tid);
-            var res = MakePacket(resFull, fc, ModbusFunction.FC06_WriteSingleRegister,
+            byte[] resFull = await SendAndReceiveAsync(reqFull);
+
+            if (resFull.Length < 9)
+                return new DeviceResponse("ERROR: Response too short") { Request = req };
+
+            byte resFc = resFull[7];
+            if ((resFc & 0x80) != 0)
+            {
+                byte exCode = resFull[8];
+                return new DeviceResponse($"ERROR: Modbus Exception 0x{exCode:X2}")
+                {
+                    Request = req,
+                    Response = MakePacket(resFull, resFc, ModbusFunction.FC06_WriteSingleRegister,
+                                          startAddr, qty: 0,
+                                          byteCount: 0,
+                                          dataBytes: new byte[] { exCode },
+                                          isResponse: true)
+                };
+            }
+
+            byte resAddrHi = resFull[8];
+            byte resAddrLo = resFull[9];
+            byte resValHi = resFull[10];
+            byte resValLo = resFull[11];
+
+            var res = MakePacket(resFull, resFc, ModbusFunction.FC06_WriteSingleRegister,
                                  startAddr, qty: 0,
-                                 byteCount: 0, dataBytes: new byte[] { valHi, valLo },
+                                 byteCount: 0,
+                                 dataBytes: new byte[] { resValHi, resValLo },
                                  isResponse: true);
 
             return new DeviceResponse("OK") { Request = req, Response = res };
         }
 
-        // ── FC16 – Write Multiple Registers ──────────────────────────────────
-        private DeviceResponse BuildWriteMultipleRegistersResponse()
+        // ── FC16 – Write Multiple Registers ───────────────────────────────────
+        private async Task<DeviceResponse> BuildWriteMultipleRegistersResponse()
         {
             const byte fc = (byte)ModbusFunction.FC16_WriteMultipleRegisters;
             byte addrHi = 0x00; byte addrLo = 0x00;
@@ -213,10 +273,27 @@ namespace Edj20Tester
                                  byteCount, dataBytes: new byte[] { r1Hi, r1Lo, r2Hi, r2Lo },
                                  isResponse: false);
 
-            ushort resTid = NextTransactionId();
-            byte[] resPdu = { fc, addrHi, addrLo, qtyHi, qtyLo };
-            byte[] resFull = BuildTcpFrame(resPdu, resTid);
-            var res = MakePacket(resFull, fc, ModbusFunction.FC16_WriteMultipleRegisters,
+            byte[] resFull = await SendAndReceiveAsync(reqFull);
+
+            if (resFull.Length < 9)
+                return new DeviceResponse("ERROR: Response too short") { Request = req };
+
+            byte resFc = resFull[7];
+            if ((resFc & 0x80) != 0)
+            {
+                byte exCode = resFull[8];
+                return new DeviceResponse($"ERROR: Modbus Exception 0x{exCode:X2}")
+                {
+                    Request = req,
+                    Response = MakePacket(resFull, resFc, ModbusFunction.FC16_WriteMultipleRegisters,
+                                          startAddr, qty,
+                                          byteCount: 0,
+                                          dataBytes: new byte[] { exCode },
+                                          isResponse: true)
+                };
+            }
+
+            var res = MakePacket(resFull, resFc, ModbusFunction.FC16_WriteMultipleRegisters,
                                  startAddr, qty,
                                  byteCount: 0, dataBytes: null,
                                  isResponse: true);
