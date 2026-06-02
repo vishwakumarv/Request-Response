@@ -87,6 +87,7 @@
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
@@ -179,34 +180,69 @@
             </StackPanel>
         </Border>
 
-        <!-- TOP CONTROLS -->
-        <StackPanel Grid.Row="2" Orientation="Horizontal"
+        <!-- FUNCTION + READ MODE ROW -->
+        <Border Grid.Row="2"
+                Background="#111111"
+                BorderBrush="#555555"
+                BorderThickness="1"
+                CornerRadius="8"
+                Padding="12,8"
+                Margin="0,0,0,10">
+            <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+
+                <TextBlock Text="Function:"
+                           Foreground="#AAAAAA"
+                           FontSize="13"
+                           FontFamily="Consolas"
+                           VerticalAlignment="Center"
+                           Margin="0,0,8,0"/>
+
+                <ComboBox Name="FunctionSelector"
+                          Width="280" Height="40"
+                          SelectedIndex="0"
+                          Margin="0,0,20,0"
+                          VerticalContentAlignment="Center"
+                          SelectionChanged="FunctionSelector_SelectionChanged">
+                    <ComboBoxItem Content="FC03 – Read Holding Registers"
+                                  Tag="{x:Static models:ModbusFunction.FC03_ReadHoldingRegisters}"/>
+                    <ComboBoxItem Content="FC04 – Read Input Registers"
+                                  Tag="{x:Static models:ModbusFunction.FC04_ReadInputRegisters}"/>
+                    <ComboBoxItem Content="FC06 – Write Single Register"
+                                  Tag="{x:Static models:ModbusFunction.FC06_WriteSingleRegister}"/>
+                    <ComboBoxItem Content="FC16 – Write Multiple Registers"
+                                  Tag="{x:Static models:ModbusFunction.FC16_WriteMultipleRegisters}"/>
+                </ComboBox>
+
+                <!-- READ MODE: only visible for FC03 / FC04 -->
+                <StackPanel Name="PanelReadMode"
+                            Orientation="Horizontal"
+                            VerticalAlignment="Center"
+                            Margin="0,0,20,0"
+                            Visibility="Visible">
+                    <TextBlock Text="Read Mode:"
+                               Foreground="#AAAAAA"
+                               FontFamily="Consolas"
+                               FontSize="13"
+                               VerticalAlignment="Center"
+                               Margin="0,0,8,0"/>
+                    <ComboBox Name="ReadModeSelector"
+                              Width="200" Height="40"
+                              SelectedIndex="0"
+                              VerticalContentAlignment="Center"
+                              SelectionChanged="ReadModeSelector_SelectionChanged">
+                        <ComboBoxItem Content="Single Register"/>
+                        <ComboBoxItem Content="Multiple Registers"/>
+                    </ComboBox>
+                </StackPanel>
+
+            </StackPanel>
+        </Border>
+
+        <!-- TOP CONTROLS (address / quantity / buttons) -->
+        <StackPanel Grid.Row="3" Orientation="Horizontal"
                     Margin="0,0,0,12" VerticalAlignment="Center">
 
-            <TextBlock Text="Function:"
-                       Foreground="#AAAAAA"
-                       FontSize="13"
-                       FontFamily="Consolas"
-                       VerticalAlignment="Center"
-                       Margin="0,0,8,0"/>
-
-            <ComboBox Name="FunctionSelector"
-                      Width="280" Height="40"
-                      SelectedIndex="0"
-                      Margin="0,0,12,0"
-                      VerticalContentAlignment="Center"
-                      SelectionChanged="FunctionSelector_SelectionChanged">
-                <ComboBoxItem Content="FC03 – Read Holding Registers"
-                              Tag="{x:Static models:ModbusFunction.FC03_ReadHoldingRegisters}"/>
-                <ComboBoxItem Content="FC04 – Read Input Registers"
-                              Tag="{x:Static models:ModbusFunction.FC04_ReadInputRegisters}"/>
-                <ComboBoxItem Content="FC06 – Write Single Register"
-                              Tag="{x:Static models:ModbusFunction.FC06_WriteSingleRegister}"/>
-                <ComboBoxItem Content="FC16 – Write Multiple Registers"
-                              Tag="{x:Static models:ModbusFunction.FC16_WriteMultipleRegisters}"/>
-            </ComboBox>
-
-            <!-- Start Address (shown for FC03/FC04) -->
+            <!-- Start Address (always shown for FC03/FC04) -->
             <StackPanel Name="PanelStartAddress"
                         Orientation="Horizontal"
                         VerticalAlignment="Center"
@@ -223,12 +259,12 @@
                          Text="0"/>
             </StackPanel>
 
-            <!-- Quantity (shown for FC03/FC04) -->
+            <!-- Quantity (only shown for Multiple Registers mode) -->
             <StackPanel Name="PanelQuantity"
                         Orientation="Horizontal"
                         VerticalAlignment="Center"
                         Margin="0,0,12,0"
-                        Visibility="Visible">
+                        Visibility="Collapsed">
                 <TextBlock Text="Quantity:"
                            Foreground="#AAAAAA"
                            FontFamily="Consolas"
@@ -261,7 +297,7 @@
         </StackPanel>
 
         <!-- SIDE-BY-SIDE PACKET AREA -->
-        <Grid Grid.Row="3">
+        <Grid Grid.Row="4">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*"/>
                 <ColumnDefinition Width="14"/>
@@ -333,7 +369,7 @@
         </Grid>
 
         <!-- STATUS BAR -->
-        <Border Grid.Row="4"
+        <Border Grid.Row="5"
                 Background="#222222"
                 CornerRadius="8"
                 Padding="12"
