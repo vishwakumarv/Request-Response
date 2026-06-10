@@ -1,4 +1,3 @@
-
 # Modbus RTU vs Modbus TCP/IP
 
 ## What Changes?
